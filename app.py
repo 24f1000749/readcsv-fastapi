@@ -1,12 +1,11 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
+import csv
 import io
 import re
 
 app = FastAPI()
 
-# Enable CORS for all origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,80 +14,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-EMAIL = "your-email@example.com"
+EMAIL = "24f1000749@ds.study.iitm.ac.in"
 
 @app.get("/")
-def home():
+def root():
     return {"message": "API is running"}
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     content = await file.read()
 
-    # Try different encodings because the CSV may be messy
-    try:
-        df = pd.read_csv(
-            io.BytesIO(content),
-            dtype=str,
-            keep_default_na=False
-        )
-    except:
-        df = pd.read_csv(
-            io.BytesIO(content),
-            dtype=str,
-            keep_default_na=False,
-            encoding="latin1"
-        )
+    # try different encodings
+    text = None
+    for enc in ["utf-8", "latin1", "cp1252"]:
+        try:
+            text = content.decode(enc)
+            break
+        except:
+            pass
 
-    # Clean column names
-    df.columns = [str(col).strip().lower() for col in df.columns]
-
-    category_col = None
-    amount_col = None
-
-    # Automatically find the category and amount columns
-    for col in df.columns:
-        clean = col.lower().strip()
-
-        if category_col is None and "category" in clean:
-            category_col = col
-
-        if amount_col is None and (
-            "amount" in clean
-            or "price" in clean
-            or "cost" in clean
-            or "spent" in clean
-            or "value" in clean
-        ):
-            amount_col = col
-
-    # If columns not found, return 0 instead of crashing
-    if category_col is None or amount_col is None:
+    if text is None:
         return {
             "answer": 0,
             "email": EMAIL,
             "exam": "tds-2025-05-roe"
         }
 
+    # detect separator
+    sep = ","
+    if text.count(";") > text.count(","):
+        sep = ";"
+
+    reader = csv.DictReader(io.StringIO(text), delimiter=sep)
+
     total = 0.0
 
-    for _, row in df.iterrows():
-        try:
-            category = str(row[category_col]).strip().lower()
+    for row in reader:
+        clean_row = {}
 
-            # remove extra spaces inside the category
-            category = " ".join(category.split())
+        # clean column names and values
+        for k, v in row.items():
+            if k is None:
+                continue
+            clean_row[k.strip().lower()] = (v or "").strip()
 
-            if category == "food":
-                amount = str(row[amount_col]).strip()
+        category = ""
+        amount = ""
 
-                # Remove commas, currency symbols, spaces, etc.
-                amount = re.sub(r"[^0-9.\-]", "", amount)
+        for key, value in clean_row.items():
+            if "category" in key:
+                category = value.strip().lower()
 
-                if amount != "":
-                    total += float(amount)
-        except:
-            continue
+            if any(word in key for word in ["amount", "cost", "price", "spent", "value"]):
+                amount = value
+
+        if category == "food":
+            amount = re.sub(r"[^0-9.-]", "", amount)
+
+            try:
+                total += float(amount)
+            except:
+                pass
 
     if total.is_integer():
         total = int(total)
