@@ -6,6 +6,7 @@ import re
 
 app = FastAPI()
 
+# Enable CORS for all origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,72 +15,86 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MY_EMAIL = "24f1000749@ds.study.iitm.ac.in"
+EMAIL = "your-email@example.com"
+
+@app.get("/")
+def home():
+    return {"message": "API is running"}
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     content = await file.read()
 
-    # Try reading messy CSV
-    df = pd.read_csv(
-        io.BytesIO(content),
-        dtype=str,
-        encoding="utf-8",
-        keep_default_na=False
-    )
+    # Try different encodings because the CSV may be messy
+    try:
+        df = pd.read_csv(
+            io.BytesIO(content),
+            dtype=str,
+            keep_default_na=False
+        )
+    except:
+        df = pd.read_csv(
+            io.BytesIO(content),
+            dtype=str,
+            keep_default_na=False,
+            encoding="latin1"
+        )
 
     # Clean column names
-    df.columns = [str(c).strip().lower() for c in df.columns]
+    df.columns = [str(col).strip().lower() for col in df.columns]
 
-    # Find category and amount columns automatically
     category_col = None
     amount_col = None
 
+    # Automatically find the category and amount columns
     for col in df.columns:
-        c = col.lower()
+        clean = col.lower().strip()
 
-        if category_col is None and "category" in c:
+        if category_col is None and "category" in clean:
             category_col = col
 
         if amount_col is None and (
-            "amount" in c or
-            "price" in c or
-            "cost" in c or
-            "spent" in c
+            "amount" in clean
+            or "price" in clean
+            or "cost" in clean
+            or "spent" in clean
+            or "value" in clean
         ):
             amount_col = col
 
+    # If columns not found, return 0 instead of crashing
     if category_col is None or amount_col is None:
         return {
             "answer": 0,
-            "email": MY_EMAIL,
+            "email": EMAIL,
             "exam": "tds-2025-05-roe"
         }
 
     total = 0.0
 
     for _, row in df.iterrows():
-        category = str(row[category_col]).strip().lower()
+        try:
+            category = str(row[category_col]).strip().lower()
 
-        # remove extra spaces inside text
-        category = " ".join(category.split())
+            # remove extra spaces inside the category
+            category = " ".join(category.split())
 
-        if category == "food":
-            value = str(row[amount_col]).strip()
+            if category == "food":
+                amount = str(row[amount_col]).strip()
 
-            # remove commas, ₹, $, spaces, etc
-            value = re.sub(r"[^0-9.\-]", "", value)
+                # Remove commas, currency symbols, spaces, etc.
+                amount = re.sub(r"[^0-9.\-]", "", amount)
 
-            try:
-                total += float(value)
-            except:
-                pass
+                if amount != "":
+                    total += float(amount)
+        except:
+            continue
 
     if total.is_integer():
         total = int(total)
 
     return {
         "answer": total,
-        "email": MY_EMAIL,
+        "email": EMAIL,
         "exam": "tds-2025-05-roe"
     }
